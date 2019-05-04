@@ -101,174 +101,175 @@ let bodyTemp = {
 app.post('/block', (req, res) => {
   try {
     // address and star data must be poulated.
-    if (req.body.address && req.body.star)
-    {
-      //check that the star is not an array. (one star at a time requirements)
-      if (typeof req.body.star.length === 'undefined' ) // if no length then not array
+    if (req.body.address && req.body.star && req.body.star.story &&
+      req.body.star.dec && req.body.star.ra )
       {
-        // check if there is a valid request (verified)
-        if (mempoolObj.verifyAddressRequest(req))
+        //check that the star is not an array. (one star at a time requirements)
+        if (typeof req.body.star.length === 'undefined' ) // if no length then not array
         {
-          // if yes, build the response by assigning attributes from req
-          let body = { ...bodyTemp };
-          body.address = req.body.address;
-          for (let key in req.body.star)
+          // check if there is a valid request (verified)
+          if (mempoolObj.verifyAddressRequest(req))
           {
-            if (key === "story") // encode the story.
+            // if yes, build the response by assigning attributes from req
+            let body = { ...bodyTemp };
+            body.address = req.body.address;
+            for (let key in req.body.star)
             {
-              body.star[key] = Buffer.from(req.body.star[key], "utf8").toString('hex');
+              if (key === "story") // encode the story.
+              {
+                body.star[key] = Buffer.from(req.body.star[key], "utf8").toString('hex');
+              }
+              else {  // just pass the attribute
+                body.star[key] = req.body.star[key];
+              }
             }
-            else {  // just pass the attribute
-              body.star[key] = req.body.star[key];
+
+            for (let key in body.star) // to delete non-populated properties
+            {
+              if (body.star[key] == null)
+              {
+                delete body.star[key];
+              }
             }
+
+            //adding the block to the blockchain
+            let toAddBlock = new Block.Block(body);
+            let p = BChain.addBlock(toAddBlock); // get the promise resolve value
+            p.then((b) => {
+              b = JSON.parse(b);
+              // for the requirements (one star at a time), remove the validation
+              // requests after adding the star
+              mempoolObj.removeValidationRequest(req.body.address);
+              mempoolObj.removeValidRequest(req.body.address);
+
+              //get and add the story decoded to the response.
+              if (b.body.star)
+              {
+                b.body.star.storyDecoded = hex2ascii(b.body.star.story);
+              }
+              res.status(201).send(b);
+            });
+
           }
-
-          for (let key in body.star) // to delete non-populated properties
-          {
-            if (body.star[key] == null)
-            {
-              delete body.star[key];
-            }
+          else {
+            res.status(500).send("No active requests for this address!");
           }
-
-          //adding the block to the blockchain
-          let toAddBlock = new Block.Block(body);
-          let p = BChain.addBlock(toAddBlock); // get the promise resolve value
-          p.then((b) => {
-            b = JSON.parse(b);
-            // for the requirements (one star at a time), remove the validation
-            // requests after adding the star
-            mempoolObj.removeValidationRequest(req.body.address);
-            mempoolObj.removeValidRequest(req.body.address);
-
-            //get and add the story decoded to the response.
-            if (b.body.star)
-            {
-              b.body.star.storyDecoded = hex2ascii(b.body.star.story);
-            }
-            res.status(201).send(b);
-          });
-
         }
         else {
-          res.status(500).send("No active requests for this address!");
+          res.status(500).send("Make sure you send one star only!");
         }
       }
       else {
-        res.status(500).send("Make sure you send one star only!");
+        res.status(500).send("Please provide correct payload content");
       }
+
     }
-    else {
-      res.status(500).send("Please provide correct payload content");
+    catch (e)
+    {
+      res.status(500).send("Bad request! please check the payload!");
     }
+  });
 
-  }
-  catch (e)
+
+
+  // GET endpoint API to get a star(block) by height
+  app.get('/block/:height', (req, res) =>
   {
-    res.status(500).send("Bad request! please check the payload!");
-  }
-});
-
-
-
-// GET endpoint API to get a star(block) by height
-app.get('/block/:height', (req, res) =>
-{
-  try{
-    // if height is not specified, the framework itself return
-    // message: Cannot GET /block/ (no need to handle this case).
-    let height = req.params.height;   //get the height
-    let p = BChain.getBlock(height);  //get the block (promise)
-    p.then((b) => {
-      // the getBlock promise will resolve with undefined if block not found.
-      if (b === undefined)
-      {
-        res.status(404).json({
-          "status": 404,
-          "message": "Block not found"
-        });
-      }
-      else {
-        // get the decoded story and add to the response
-        if (b.body.star)
+    try{
+      // if height is not specified, the framework itself return
+      // message: Cannot GET /block/ (no need to handle this case).
+      let height = req.params.height;   //get the height
+      let p = BChain.getBlock(height);  //get the block (promise)
+      p.then((b) => {
+        // the getBlock promise will resolve with undefined if block not found.
+        if (b === undefined)
         {
-          b.body.star.storyDecoded = hex2ascii(b.body.star.story);
+          res.status(404).json({
+            "status": 404,
+            "message": "Block not found"
+          });
         }
-        res.status(201).send(b);
-      }
+        else {
+          // get the decoded story and add to the response
+          if (b.body.star)
+          {
+            b.body.star.storyDecoded = hex2ascii(b.body.star.story);
+          }
+          res.status(201).send(b);
+        }
 
-    });
-  }
-  catch (e)
+      });
+    }
+    catch (e)
+    {
+      res.status(500).send("Bad request! please check the payload!");
+    }
+  });
+
+
+  // GET endpoint API to get star/block by hash
+  app.get('/stars/hash/:hash', (req, res) =>
   {
-    res.status(500).send("Bad request! please check the payload!");
-  }
-});
-
-
-// GET endpoint API to get star/block by hash
-app.get('/stars/hash/:hash', (req, res) =>
-{
-  try{
-    let hash = req.params.hash.trim();   //get the hash from the request.
-    let p = BChain.getBlockByHash(hash);
-    p.then((b) => {
-      // the getBlockByHash promise will resolve with undefined if block not found.
-      if (b === undefined)
-      {
-        res.status(404).json({
-          "status": 404,
-          "message": "Block not found"
-        });
-      }
-      else {
-        // get the decoded story and added to the response.
-        if (b.body.star)
+    try{
+      let hash = req.params.hash.trim();   //get the hash from the request.
+      let p = BChain.getBlockByHash(hash);
+      p.then((b) => {
+        // the getBlockByHash promise will resolve with undefined if block not found.
+        if (b === undefined)
         {
-          b.body.star.storyDecoded = hex2ascii(b.body.star.story);
+          res.status(404).json({
+            "status": 404,
+            "message": "Block not found"
+          });
         }
-        res.status(201).send(b);
-      }
-    });
-  }
-  catch (e)
-  {
-    res.status(500).send("Bad request! please check the payload!");
-  }
-});
+        else {
+          // get the decoded story and added to the response.
+          if (b.body.star)
+          {
+            b.body.star.storyDecoded = hex2ascii(b.body.star.story);
+          }
+          res.status(201).send(b);
+        }
+      });
+    }
+    catch (e)
+    {
+      res.status(500).send("Bad request! please check the payload!");
+    }
+  });
 
-// GET endpoint API to get blocks/stars by wallet address
-// this expects an array of blocks
-app.get('/stars/address/:address', (req, res) =>
-{
-  try{
-    let address = req.params.address.trim();   //get the wallet address
-    let p = BChain.getBlockByWalletAddress(address);
-    p.then((bArr) => {
-      // if the array is empty we response with proper error.
-      if (bArr.length == 0)
-      {
-        res.status(404).json({
-          "status": 404,
-          "message": "No Blocks found for the address!"
-        });
-      }
-      else {
-        // get the decoded story for all the blocks and adjust the array
-        for (let i in bArr)
+  // GET endpoint API to get blocks/stars by wallet address
+  // this expects an array of blocks
+  app.get('/stars/address/:address', (req, res) =>
+  {
+    try{
+      let address = req.params.address.trim();   //get the wallet address
+      let p = BChain.getBlockByWalletAddress(address);
+      p.then((bArr) => {
+        // if the array is empty we response with proper error.
+        if (bArr.length == 0)
         {
-          bArr[i].body.star.storyDecoded = hex2ascii(bArr[i].body.star.story)
+          res.status(404).json({
+            "status": 404,
+            "message": "No Blocks found for the address!"
+          });
         }
-        // response with the array
-        res.status(201).send(bArr);
-      }
-    });
-  }
-  catch (e)
-  {
-    res.status(500).send("Bad request! please check the payload!");
-  }
-});
+        else {
+          // get the decoded story for all the blocks and adjust the array
+          for (let i in bArr)
+          {
+            bArr[i].body.star.storyDecoded = hex2ascii(bArr[i].body.star.story)
+          }
+          // response with the array
+          res.status(201).send(bArr);
+        }
+      });
+    }
+    catch (e)
+    {
+      res.status(500).send("Bad request! please check the payload!");
+    }
+  });
 
-// start express app
-app.listen(port, () => console.log(`Server Listening for port: ${port}`)) ;
+  // start express app
+  app.listen(port, () => console.log(`Server Listening for port: ${port}`)) ;
